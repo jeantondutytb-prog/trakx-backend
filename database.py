@@ -1,6 +1,5 @@
 """
-VintedSpy — Database
-SQLite en local, PostgreSQL sur Render via pg8000 (pure Python).
+VintedSpy — Database avec connection pooling
 """
 import os, statistics, logging
 from datetime import datetime, timedelta
@@ -8,23 +7,38 @@ from pathlib import Path
 
 log = logging.getLogger("database")
 DATABASE_URL = os.getenv("DATABASE_URL")
+_conn_cache = None
 
 def get_conn():
+    global _conn_cache
     if DATABASE_URL:
         import pg8000.native
-        # Parser l'URL postgresql://user:pass@host/db
-        url = DATABASE_URL.replace("postgresql://", "").replace("postgres://", "")
-        user_pass, rest = url.split("@")
-        user, password = user_pass.split(":")
-        host_db = rest.split("/")
-        host = host_db[0]
+        # Réutiliser la connexion existante si possible
+        try:
+            if _conn_cache is not None:
+                _conn_cache.run("SELECT 1")
+                return _conn_cache, "pg"
+        except:
+            _conn_cache = None
+
+        url = DATABASE_URL.replace("postgresql://","").replace("postgres://","")
+        user_pass, rest = url.split("@", 1)
+        user, password = user_pass.split(":", 1)
+        host_db = rest.split("/", 1)
+        host_port = host_db[0]
         db = host_db[1].split("?")[0]
         port = 5432
-        if ":" in host:
-            host, port = host.split(":")
+        if ":" in host_port:
+            host, port = host_port.split(":", 1)
             port = int(port)
-        conn = pg8000.native.Connection(user=user, password=password, host=host, port=port, database=db, ssl_context=True)
-        return conn, "pg"
+        else:
+            host = host_port
+
+        _conn_cache = pg8000.native.Connection(
+            user=user, password=password, host=host,
+            port=port, database=db, ssl_context=True
+        )
+        return _conn_cache, "pg"
     else:
         import sqlite3
         db_path = Path.home() / "Downloads" / "vintedspy.db"
