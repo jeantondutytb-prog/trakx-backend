@@ -9,12 +9,13 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
+log_path = Path("/tmp/vintedspy.log") if not (Path.home() / "Downloads").exists() else Path.home() / "Downloads" / "vintedspy.log"
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(Path.home() / "Downloads" / "vintedspy.log")
+        logging.FileHandler(log_path)
     ]
 )
 log = logging.getLogger("scheduler")
