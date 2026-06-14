@@ -1,34 +1,217 @@
 """
 VintedSpy — Scheduler
-Tourne en boucle, scrape toutes les 5 minutes, stocke et score.
-Lance avec : python3 scheduler.py
+Scrape toutes les niches configurées toutes les X minutes.
 """
 import asyncio, httpx, json, logging
 from datetime import datetime
 from pathlib import Path
-import sys
+import sys, os
 sys.path.insert(0, str(Path(__file__).parent))
 
 log_path = Path("/tmp/vintedspy.log") if not (Path.home() / "Downloads").exists() else Path.home() / "Downloads" / "vintedspy.log"
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(log_path)
-    ]
+    handlers=[logging.StreamHandler(), logging.FileHandler(log_path)]
 )
 log = logging.getLogger("scheduler")
 
 BASE = "https://www.vinted.fr"
 UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148"
-INTERVAL = 300  # secondes entre chaque scan (5 min)
+INTERVAL = int(os.getenv("SCAN_INTERVAL", "300"))
 
 NICHES = [
-    "levi 501",
-    "nike air force 1",
-    "north face",
-    "carhartt",
+    "a.f.vandevorst",
+    "a.p.c.",
+    "a.p.c. x carhartt",
+    "a.p.c. x kanye west",
+    "a.p.c. x nike",
+    "a.p.c. x sacai",
+    "adidas x missoni",
+    "agent provocateur",
+    "agnes b",
+    "alaïa",
+    "amazon",
+    "amina muaddi",
+    "ann demeulemeester",
+    "apple",
+    "arte",
+    "asus",
+    "ba&sh",
+    "bally",
+    "balmain",
+    "balmain x h&m",
+    "balzac paris",
+    "barbour",
+    "belles des pins",
+    "bose",
+    "bottega veneta",
+    "braun",
+    "burberry",
+    "bylima",
+    "calarena",
+    "canon",
+    "carolina herrera",
+    "chanel",
+    "chloé",
+    "christian dior",
+    "christian louboutin",
+    "claris virot",
+    "class roberto cavalli",
+    "coach",
+    "converse x missoni",
+    "coperni",
+    "coros",
+    "courrèges",
+    "crockett & jones",
+    "currentbody",
+    "demellier",
+    "dior",
+    "dji",
+    "dolce & gabbana",
+    "dr dennis gross",
+    "dôen",
+    "elisabetta franchi",
+    "emilio pucci",
+    "epson",
+    "equi théme",
+    "eres",
+    "escada",
+    "etro",
+    "fendi",
+    "freitag",
+    "fujifilm",
+    "garmin",
+    "gerard darel",
+    "giuseppe zanotti",
+    "givenchy",
+    "gopro",
+    "gucci",
+    "gucci x adidas",
+    "gucci x balenciaga",
+    "gucci x dapper dan",
+    "gucci x disney",
+    "gucci x doraemon",
+    "gucci x mlb",
+    "gucci x palace",
+    "harris tweed",
+    "hermès",
+    "hit",
+    "hit air",
+    "insta360",
+    "isabel marant",
+    "isabel marant étoile",
+    "jean paul gaultier",
+    "jil sander",
+    "jimmy choo x mugler",
+    "john galliano",
+    "jordan x the attico",
+    "jérôme dreyfuss",
+    "k-way",
+    "kitchenaid",
+    "kobo",
+    "kujten",
+    "l'agent by agent provocateur",
+    "l'oréal",
+    "lemaire",
+    "livy",
+    "livystone",
+    "loewe",
+    "louis vuitton",
+    "louis vuitton x christian louboutin",
+    "lpg",
+    "lupo barcelona",
+    "m missoni",
+    "magda butrym",
+    "maison margiela",
+    "maje",
+    "manolo blahnik",
+    "maria de la orden",
+    "marni",
+    "max mara",
+    "mcm",
+    "miphai",
+    "missoni",
+    "missoni home",
+    "missoni mare",
+    "miu miu",
+    "mm6 maison margiela",
+    "momcozy",
+    "montbell",
+    "montblanc",
+    "mugler",
+    "mugler x h&m",
+    "mulberry",
+    "mulberry & grand",
+    "mulberry secret",
+    "mulberry street",
+    "mulberry studios",
+    "mulberry x acne studios",
+    "naked wolfe",
+    "new rock",
+    "nikon",
+    "nintendo",
+    "nooance",
+    "octobre editions",
+    "olympus",
+    "onyx",
+    "orciani",
+    "our legacy",
+    "paco rabanne",
+    "palm angels x missoni",
+    "parajumpers",
+    "philips",
+    "pierre balmain",
+    "pioneer",
+    "plein sud",
+    "prada",
+    "proenza schouler",
+    "proenza schouler white label",
+    "puma x balmain",
+    "rat & boa",
+    "red wing shoes",
+    "reebok x ba&sh",
+    "reina olga",
+    "remarkable",
+    "renouard",
+    "revitive",
+    "richard orlinski",
+    "roberta di camerino",
+    "roberto cavalli",
+    "roberto cavalli sport",
+    "roberto cavalli x h&m",
+    "s.t. dupont",
+    "salvatore ferragamo",
+    "samshield",
+    "sandro",
+    "scuffers",
+    "see by chloé",
+    "self-portrait",
+    "shark",
+    "shokz",
+    "silk'n",
+    "sima couture",
+    "soeur",
+    "sommer swim",
+    "sonia rykiel",
+    "spark",
+    "stella mccartney",
+    "supreme x emilio pucci",
+    "suunto",
+    "sézane",
+    "the attico",
+    "the frankie shop",
+    "the north face x gucci",
+    "therabody",
+    "thermomix",
+    "tory burch",
+    "tumi",
+    "vanessa bruno",
+    "versace",
+    "wandler",
+    "zanellato",
+    "zimmermann",
+    "zoé lu",
 ]
 
 async def scraper_niche(session, search, cookies_str):
@@ -74,39 +257,31 @@ async def get_cookies():
 
 async def run_scan():
     from database import init_db, sauvegarder_annonces, get_opportunites, stats_db
-    log.info("=== Démarrage scan ===")
+    log.info(f"=== Scan de {len(NICHES)} niches ===")
 
     try:
         cookies_str, jar = await get_cookies()
     except Exception as e:
-        log.error(f"Impossible d'obtenir les cookies: {e}")
+        log.error(f"Cookies: {e}")
         return
 
     async with httpx.AsyncClient(follow_redirects=True, timeout=20, cookies=jar) as s:
         toutes = []
         for niche in NICHES:
             annonces = await scraper_niche(s, niche, cookies_str)
-            log.info(f"  '{niche}': {len(annonces)} annonces")
+            if annonces:
+                log.info(f"  '{niche}': {len(annonces)} annonces")
             toutes.extend(annonces)
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
 
     nouvelles = sauvegarder_annonces(toutes)
     stats = stats_db()
-    opps = get_opportunites(10)
-
     log.info(f"Scan terminé — {nouvelles} nouvelles | DB: {stats['annonces']} annonces")
-    log.info(f"Top opportunité: {opps[0]['titre'][:40]} | {opps[0]['prix']}€ vs {opps[0]['prix_median']}€ médiane | score {opps[0]['score']}" if opps else "Pas encore de scores")
-
-    # Sauvegarder le top opportunités en JSON (l'API le lit)
-    out = Path.home() / "Downloads" / "opportunites.json"
-    with open(out, "w") as f:
-        json.dump(opps, f, ensure_ascii=False, indent=2)
 
 async def main():
     from database import init_db
     init_db()
-    log.info(f"Scheduler démarré — scan toutes les {INTERVAL//60} minutes")
-    log.info("Ctrl+C pour arrêter\n")
+    log.info(f"Scheduler démarré — {len(NICHES)} niches — scan toutes les {INTERVAL//60} min")
 
     scan_count = 0
     while True:
@@ -116,9 +291,6 @@ async def main():
             await run_scan()
         except Exception as e:
             log.error(f"Erreur scan #{scan_count}: {e}")
-
-        next_scan = datetime.now().strftime('%H:%M:%S')
-        log.info(f"Prochain scan dans {INTERVAL//60} min...")
         await asyncio.sleep(INTERVAL)
 
 if __name__ == "__main__":
