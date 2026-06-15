@@ -147,6 +147,59 @@ def get_opportunites(limit: int = 20) -> list[dict]:
             resultats.append(a)
     return sorted(resultats, key=lambda x: x["score"], reverse=True)[:limit]
 
+def get_feed_annonces(offset: int = 0, limit: int = 40, marque: str = None,
+                       prix_min: float = None, prix_max: float = None,
+                       search: str = None, order: str = "recent") -> list[dict]:
+    conn, mode = get_conn()
+    order_clause = {
+        "recent":    "scraped_le DESC",
+        "prix_asc":  "prix ASC",
+        "prix_desc": "prix DESC",
+        "favs":      "nb_favoris DESC",
+    }.get(order, "scraped_le DESC")
+
+    if mode == "pg":
+        conditions, kwargs = [], {}
+        if marque:
+            conditions.append("LOWER(marque) LIKE :marque")
+            kwargs["marque"] = f"%{marque.lower()}%"
+        if prix_min is not None:
+            conditions.append("prix >= :prix_min")
+            kwargs["prix_min"] = prix_min
+        if prix_max is not None:
+            conditions.append("prix <= :prix_max")
+            kwargs["prix_max"] = prix_max
+        if search:
+            conditions.append("(LOWER(titre) LIKE :search OR LOWER(marque) LIKE :search2)")
+            kwargs["search"] = f"%{search.lower()}%"
+            kwargs["search2"] = f"%{search.lower()}%"
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        q = f"SELECT id,titre,marque,taille,prix,nb_favoris,url,photo,vendeur,scraped_le FROM annonces {where} ORDER BY {order_clause} LIMIT :limit OFFSET :offset"
+        kwargs.update({"limit": limit, "offset": offset})
+        rows = conn.run(q, **kwargs)
+        cols = ["id","titre","marque","taille","prix","nb_favoris","url","photo","vendeur","scraped_le"]
+        return [dict(zip(cols, r)) for r in rows]
+    else:
+        conditions, params = [], []
+        if marque:
+            conditions.append("LOWER(marque) LIKE ?")
+            params.append(f"%{marque.lower()}%")
+        if prix_min is not None:
+            conditions.append("prix >= ?")
+            params.append(prix_min)
+        if prix_max is not None:
+            conditions.append("prix <= ?")
+            params.append(prix_max)
+        if search:
+            conditions.append("(LOWER(titre) LIKE ? OR LOWER(marque) LIKE ?)")
+            params.extend([f"%{search.lower()}%", f"%{search.lower()}%"])
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        q = f"SELECT * FROM annonces {where} ORDER BY {order_clause} LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        rows = conn.execute(q, params).fetchall()
+        return [dict(r) for r in rows]
+
+
 def stats_db() -> dict:
     conn, mode = get_conn()
     if mode == "pg":

@@ -57,6 +57,25 @@ def annonces(
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+@app.get("/feed")
+def feed(
+    offset: int = Query(0, ge=0),
+    limit: int = Query(40, ge=1, le=100),
+    marque: str = Query(None),
+    prix_min: float = Query(None),
+    prix_max: float = Query(None),
+    search: str = Query(None),
+    order: str = Query("recent"),
+):
+    try:
+        from database import get_feed_annonces
+        return get_feed_annonces(offset=offset, limit=limit, marque=marque,
+                                  prix_min=prix_min, prix_max=prix_max,
+                                  search=search, order=order)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @app.get("/ping")
 def ping():
     try:
