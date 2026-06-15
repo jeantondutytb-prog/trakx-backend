@@ -110,6 +110,23 @@ def feed(
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+@app.get("/vinted/brand/{brand_id}")
+async def vinted_brand(brand_id: int):
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"https://www.vinted.fr/api/v2/brands/{brand_id}",
+                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+                timeout=10,
+            )
+        if r.status_code != 200:
+            return JSONResponse(status_code=502, content={"error": "vinted_unreachable"})
+        data = r.json()
+        return {"id": brand_id, "title": data.get("brand", {}).get("title")}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @app.get("/me")
 async def me(user: dict = Depends(get_current_user)):
     return {"id": user.get("id"), "email": user.get("email")}
