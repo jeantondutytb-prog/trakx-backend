@@ -1,22 +1,45 @@
 """
 VintedSpy — API FastAPI
 """
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Header, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import sys
+import sys, httpx
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 app = FastAPI(title="VintedSpy API", version="1.0.0")
 
+ALLOWED_ORIGINS = [
+    "https://vintedspy.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:5500",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+SUPABASE_URL = "https://apwedqsklyzroeyrokqb.supabase.co"
+SUPABASE_ANON_KEY = "sb_publishable_ExNINsgU98WsaiqBeW0x-A_HXqQFLz1"
+
+async def get_current_user(authorization: str = Header(None)) -> dict:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Authentification requise")
+    token = authorization.split(" ", 1)[1]
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={"Authorization": f"Bearer {token}", "apikey": SUPABASE_ANON_KEY},
+            timeout=10,
+        )
+    if r.status_code != 200:
+        raise HTTPException(status_code=401, detail="Session invalide ou expirée")
+    return r.json()
 
 @app.get("/")
 def root():
@@ -77,6 +100,11 @@ def feed(
                                   search=search, order=order)
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/me")
+async def me(user: dict = Depends(get_current_user)):
+    return {"id": user.get("id"), "email": user.get("email")}
 
 
 @app.get("/ping")
