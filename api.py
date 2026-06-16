@@ -44,7 +44,9 @@ async def get_current_user(authorization: str = Header(None), require_sub: bool 
     user = r.json()
     if require_sub:
         from database import is_subscribed
-        if not is_subscribed(user.get("email", "")):
+        admin_emails = {e.strip() for e in os.getenv("ADMIN_EMAILS", "jeantondut@gmail.com").split(",")}
+        email = user.get("email", "")
+        if email not in admin_emails and not is_subscribed(email):
             raise HTTPException(status_code=403, detail="Abonnement requis")
     return user
 
