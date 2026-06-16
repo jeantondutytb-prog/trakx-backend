@@ -4,7 +4,8 @@ VintedSpy — API FastAPI
 from fastapi import FastAPI, Query, Header, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import sys, httpx, os, hmac, hashlib
+import sys, httpx, os, hmac, hashlib, logging
+log = logging.getLogger("api")
 from pathlib import Path
 
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
@@ -44,7 +45,7 @@ async def get_current_user(authorization: str = Header(None), require_sub: bool 
     user = r.json()
     if require_sub:
         from database import is_subscribed
-        admin_emails = {e.strip() for e in os.getenv("ADMIN_EMAILS", "jeantondut@gmail.com").split(",")}
+        admin_emails = {e.strip() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
         email = user.get("email", "")
         if email not in admin_emails and not is_subscribed(email):
             raise HTTPException(status_code=403, detail="Abonnement requis")
@@ -81,24 +82,6 @@ def stats():
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-@app.get("/annonces")
-def annonces(
-    marque: str = Query(None),
-    prix_max: float = Query(None),
-    score_min: int = Query(30),
-    limit: int = Query(20)
-):
-    try:
-        from database import get_opportunites
-        opps = get_opportunites(100)
-        if marque:
-            opps = [o for o in opps if marque.lower() in (o.get("marque") or "").lower()]
-        if prix_max:
-            opps = [o for o in opps if o["prix"] <= prix_max]
-        opps = [o for o in opps if o.get("score", 0) >= score_min]
-        return opps[:limit]
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get("/feed")
 def feed(
@@ -152,20 +135,23 @@ async def stripe_webhook(request: Request):
     payload = await request.body()
     sig = request.headers.get("stripe-signature", "")
 
-    # Verify Stripe signature (HMAC-SHA256)
-    if STRIPE_WEBHOOK_SECRET:
-        try:
-            parts = {k: v for item in sig.split(",") for k, v in [item.split("=", 1)]}
-            timestamp = parts.get("t", "")
-            v1 = parts.get("v1", "")
-            signed = f"{timestamp}.{payload.decode()}"
-            expected = hmac.new(STRIPE_WEBHOOK_SECRET.encode(), signed.encode(), hashlib.sha256).hexdigest()  # type: ignore
-            if not hmac.compare_digest(expected, v1):
-                raise HTTPException(status_code=400, detail="Invalid signature")
-        except HTTPException:
-            raise
-        except Exception:
-            raise HTTPException(status_code=400, detail="Webhook error")
+    # Verify Stripe signature — always required in production
+    if not STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(status_code=500, detail="Webhook secret not configured")
+    try:
+        parts = {k: v for item in sig.split(",") for k, v in [item.split("=", 1)]}
+        timestamp = parts.get("t", "")
+        v1 = parts.get("v1", "")
+        if not timestamp or not v1:
+            raise ValueError("Missing signature parts")
+        signed = f"{timestamp}.{payload.decode()}"
+        expected = hmac.new(STRIPE_WEBHOOK_SECRET.encode(), signed.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, v1):
+            raise HTTPException(status_code=400, detail="Invalid signature")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Webhook error")
 
     import json
     from database import upsert_subscription

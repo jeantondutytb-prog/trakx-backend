@@ -328,13 +328,13 @@ def _count_matching(conn, mode, marque, taille, prix_min, recherche=None):
         conditions.append("prix >= " + (":prix_min" if mode == "pg" else "?"))
         params.append(prix_min)
     if recherche:
-        ph = ":recherche" if mode == "pg" else "?"
-        conditions.append(f"(LOWER(titre) LIKE {ph} OR LOWER(marque) LIKE {ph})" if mode != "pg"
-                           else f"(LOWER(titre) LIKE {ph} OR LOWER(marque) LIKE :recherche2)")
         if mode == "pg":
+            conditions.append("(LOWER(titre) LIKE :recherche OR LOWER(marque) LIKE :recherche2)")
             params.append(f"%{recherche.lower()}%")
             params.append(f"%{recherche.lower()}%")
         else:
+            conditions.append("(LOWER(titre) LIKE ? OR LOWER(marque) LIKE ?)")
+            params.append(f"%{recherche.lower()}%")
             params.append(f"%{recherche.lower()}%")
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     q = f"SELECT COUNT(*) FROM annonces {where}"
@@ -346,7 +346,7 @@ def _count_matching(conn, mode, marque, taille, prix_min, recherche=None):
         if prix_min is not None: kwargs["prix_min"] = params[i]; i += 1
         if recherche:
             kwargs["recherche"] = params[i]; i += 1
-            kwargs["recherche2"] = params[i]; i += 1
+            kwargs["recherche2"] = params[i]; i += 1  # two identical values, two named params
         return conn.run(q, **kwargs)[0][0]
     return conn.execute(q, params).fetchone()[0]
 
