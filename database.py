@@ -95,7 +95,11 @@ def init_db():
             stripe_subscription_id TEXT,
             status TEXT NOT NULL DEFAULT 'inactive',
             current_period_end TEXT,
+            plan TEXT DEFAULT 'starter',
             updated_le TEXT)""")
+        try:
+            conn.run("ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS plan TEXT DEFAULT 'starter'")
+        except: pass
         try:
             conn.run("CREATE INDEX IF NOT EXISTS idx_sub_email ON subscriptions(user_email)")
         except: pass
@@ -159,6 +163,10 @@ def init_db():
         except: pass
         try:
             conn.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
+            conn.commit()
+        except: pass
+        try:
+            conn.execute("ALTER TABLE subscriptions ADD COLUMN plan TEXT DEFAULT 'starter'")
             conn.commit()
         except: pass
     log.info(f"DB initialisée ({mode})")
@@ -631,30 +639,39 @@ def is_subscribed(user_email: str) -> bool:
         return False
     return sub["status"] == "active"
 
+def get_user_plan(user_email: str) -> str:
+    """Returns 'starter', 'pro', 'expert', or 'free'."""
+    sub = get_subscription(user_email)
+    if not sub or sub["status"] != "active":
+        return "free"
+    return sub.get("plan") or "starter"
+
 def upsert_subscription(user_email: str, stripe_customer_id: str = None,
                          stripe_subscription_id: str = None, status: str = "active",
-                         current_period_end: str = None):
+                         current_period_end: str = None, plan: str = None):
     conn, mode = get_conn()
     now = datetime.now().isoformat()
     if mode == "pg":
-        conn.run("""INSERT INTO subscriptions (user_email,stripe_customer_id,stripe_subscription_id,status,current_period_end,updated_le)
-            VALUES (:e,:cid,:sid,:status,:cpe,:now)
+        conn.run("""INSERT INTO subscriptions (user_email,stripe_customer_id,stripe_subscription_id,status,current_period_end,plan,updated_le)
+            VALUES (:e,:cid,:sid,:status,:cpe,:plan,:now)
             ON CONFLICT (user_email) DO UPDATE SET
                 stripe_customer_id=EXCLUDED.stripe_customer_id,
                 stripe_subscription_id=EXCLUDED.stripe_subscription_id,
                 status=EXCLUDED.status,
                 current_period_end=EXCLUDED.current_period_end,
+                plan=EXCLUDED.plan,
                 updated_le=EXCLUDED.updated_le""",
             e=user_email, cid=stripe_customer_id, sid=stripe_subscription_id,
-            status=status, cpe=current_period_end, now=now)
+            status=status, cpe=current_period_end, plan=plan or "starter", now=now)
     else:
-        conn.execute("""INSERT INTO subscriptions (user_email,stripe_customer_id,stripe_subscription_id,status,current_period_end,updated_le)
-            VALUES (?,?,?,?,?,?)
+        conn.execute("""INSERT INTO subscriptions (user_email,stripe_customer_id,stripe_subscription_id,status,current_period_end,plan,updated_le)
+            VALUES (?,?,?,?,?,?,?)
             ON CONFLICT(user_email) DO UPDATE SET
                 stripe_customer_id=excluded.stripe_customer_id,
                 stripe_subscription_id=excluded.stripe_subscription_id,
                 status=excluded.status,
                 current_period_end=excluded.current_period_end,
+                plan=excluded.plan,
                 updated_le=excluded.updated_le""",
-            (user_email, stripe_customer_id, stripe_subscription_id, status, current_period_end, now))
+            (user_email, stripe_customer_id, stripe_subscription_id, status, current_period_end, plan or "starter", now))
         conn.commit()

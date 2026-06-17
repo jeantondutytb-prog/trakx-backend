@@ -150,12 +150,30 @@ async def vinted_brand(brand_id: int):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+NICHE_LIMITS = {"free": 1, "starter": 1, "pro": 5, "expert": None}
+
+def _get_plan(user: dict) -> str:
+    email = user.get("email", "")
+    admin_emails = {e.strip() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+    if email in admin_emails:
+        return "expert"
+    from database import get_user_plan
+    return get_user_plan(email)
+
+def _plan_to_amount(amount_cents: int) -> str:
+    if amount_cents >= 3990:
+        return "expert"
+    if amount_cents >= 1990:
+        return "pro"
+    return "starter"
+
 @app.get("/me")
 async def me(user: dict = Depends(get_current_user)):
     email = user.get("email", "")
     subscribed = _is_subscribed(user)
-    plan = "pro" if subscribed else "free"
-    return {"id": user.get("id"), "email": email, "subscribed": subscribed, "plan": plan}
+    plan = _get_plan(user)
+    niche_limit = NICHE_LIMITS.get(plan)
+    return {"id": user.get("id"), "email": email, "subscribed": subscribed, "plan": plan, "niche_limit": niche_limit}
 
 
 @app.post("/stripe/webhook")
@@ -191,6 +209,13 @@ async def stripe_webhook(request: Request):
     etype = event.get("type", "")
     obj = event.get("data", {}).get("object", {})
 
+    def _plan_from_sub_obj(sub_obj: dict) -> str:
+        items = sub_obj.get("items", {}).get("data", [])
+        if items:
+            amount = items[0].get("price", {}).get("unit_amount", 0) or 0
+            return _plan_to_amount(amount)
+        return "starter"
+
     if etype == "checkout.session.completed":
         email = obj.get("customer_email") or obj.get("customer_details", {}).get("email")
         if email:
@@ -202,12 +227,12 @@ async def stripe_webhook(request: Request):
             )
 
     elif etype in ("customer.subscription.updated", "customer.subscription.created"):
-        status = "active" if obj.get("status") == "active" else "inactive"
+        status = "active" if obj.get("status") in ("active", "trialing") else "inactive"
         cpe = None
         if obj.get("current_period_end"):
             from datetime import datetime
             cpe = datetime.fromtimestamp(obj["current_period_end"]).isoformat()
-        # Need customer email — fetch it via customer ID
+        plan = _plan_from_sub_obj(obj)
         customer_id = obj.get("customer")
         if customer_id and STRIPE_WEBHOOK_SECRET:
             try:
@@ -225,6 +250,7 @@ async def stripe_webhook(request: Request):
                         stripe_subscription_id=obj.get("id"),
                         status=status,
                         current_period_end=cpe,
+                        plan=plan,
                     )
             except Exception:
                 pass
@@ -255,8 +281,9 @@ async def niches_list(user: dict = Depends(get_current_user)):
     try:
         from database import list_user_niches
         niches = list_user_niches(user["id"])
-        subscribed = _is_subscribed(user)
-        return {"niches": niches, "subscribed": subscribed, "free_limit": 1}
+        plan = _get_plan(user)
+        niche_limit = NICHE_LIMITS.get(plan)
+        return {"niches": niches, "plan": plan, "niche_limit": niche_limit}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -267,10 +294,12 @@ async def niches_create(payload: dict, user: dict = Depends(get_current_user)):
         nom = (payload.get("nom") or "").strip()
         if not nom:
             return JSONResponse(status_code=400, content={"error": "Nom requis"})
-        if not _is_subscribed(user):
+        plan = _get_plan(user)
+        limit = NICHE_LIMITS.get(plan)
+        if limit is not None:
             existing = list_user_niches(user["id"])
-            if len(existing) >= 1:
-                return JSONResponse(status_code=403, content={"error": "free_limit"})
+            if len(existing) >= limit:
+                return JSONResponse(status_code=403, content={"error": "niche_limit", "plan": plan, "limit": limit})
         return create_user_niche(
             user["id"], nom,
             marque=payload.get("marque"), taille=payload.get("taille"),
