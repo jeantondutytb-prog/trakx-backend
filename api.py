@@ -97,7 +97,8 @@ def opportunites(limit: int = Query(20, ge=1, le=100)):
         from database import get_opportunites
         return get_opportunites(limit)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        log.error(f"opportunites: {e}")
+        return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 @app.get("/stats")
 def stats():
@@ -105,7 +106,8 @@ def stats():
         from database import stats_db
         return stats_db()
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        log.error(f"stats: {e}")
+        return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 
 @app.get("/feed")
@@ -129,11 +131,12 @@ async def feed(
                                   prix_min=prix_min, prix_max=prix_max,
                                   search=search, order=order, since_hours=since_hours)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        log.error(f"feed: {e}")
+        return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 
 @app.get("/vinted/brand/{brand_id}")
-async def vinted_brand(brand_id: int):
+async def vinted_brand(brand_id: int, user: dict = Depends(get_current_user)):
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
@@ -147,7 +150,8 @@ async def vinted_brand(brand_id: int):
         data = r.json()
         return {"id": brand_id, "title": data.get("brand", {}).get("title")}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        log.error(f"vinted_brand {brand_id}: {e}")
+        return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 
 NICHE_LIMITS = {"free": 1, "starter": 1, "pro": 5, "expert": None}
@@ -285,7 +289,8 @@ async def niches_list(user: dict = Depends(get_current_user)):
         niche_limit = NICHE_LIMITS.get(plan)
         return {"niches": niches, "plan": plan, "niche_limit": niche_limit}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        log.error(f"endpoint error: {e}")
+        return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 @app.post("/niches")
 async def niches_create(payload: dict, user: dict = Depends(get_current_user)):
@@ -307,7 +312,8 @@ async def niches_create(payload: dict, user: dict = Depends(get_current_user)):
             recherche=payload.get("recherche"), lien=payload.get("lien"),
         )
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        log.error(f"endpoint error: {e}")
+        return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 @app.get("/niches/{niche_id}/items")
 async def niches_items(niche_id: int, limit: int = Query(100, ge=1, le=500), user: dict = Depends(get_current_user)):
@@ -319,7 +325,8 @@ async def niches_items(niche_id: int, limit: int = Query(100, ge=1, le=500), use
             return JSONResponse(status_code=403, content={"error": "Niche introuvable"})
         return get_niche_items(niche_id, limit=limit)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        log.error(f"endpoint error: {e}")
+        return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 @app.delete("/niches/{niche_id}")
 async def niches_delete(niche_id: int, user: dict = Depends(get_current_user)):
@@ -330,7 +337,8 @@ async def niches_delete(niche_id: int, user: dict = Depends(get_current_user)):
             return JSONResponse(status_code=404, content={"error": "Niche introuvable"})
         return {"ok": True}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        log.error(f"endpoint error: {e}")
+        return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 
 # ---- SURVEILLANCE ----
@@ -341,7 +349,8 @@ async def surveillance_list(user: dict = Depends(get_subscribed_user)):
         from database import refresh_surveillance
         return refresh_surveillance(user["id"])
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        log.error(f"endpoint error: {e}")
+        return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 @app.post("/surveillance")
 async def surveillance_add(payload: dict, user: dict = Depends(get_subscribed_user)):
@@ -351,7 +360,8 @@ async def surveillance_add(payload: dict, user: dict = Depends(get_subscribed_us
             return JSONResponse(status_code=400, content={"error": "id requis"})
         return add_surveillance(user["id"], payload)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        log.error(f"endpoint error: {e}")
+        return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 @app.delete("/surveillance/{annonce_id}")
 async def surveillance_remove(annonce_id: int, user: dict = Depends(get_subscribed_user)):
@@ -360,7 +370,8 @@ async def surveillance_remove(annonce_id: int, user: dict = Depends(get_subscrib
         remove_surveillance(user["id"], annonce_id)
         return {"ok": True}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        log.error(f"endpoint error: {e}")
+        return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 
 STRIPE_DEFAULT_PRICE = "9,90€/mois"
@@ -394,4 +405,5 @@ def ping():
         s = stats_db()
         return {"status": "ok", "annonces": s.get("annonces", 0), "prix_history": s.get("prix_history", 0)}
     except Exception as e:
-        return {"status": "db_error", "error": str(e)}
+        log.error(f"ping: {e}")
+        return {"status": "db_error"}
