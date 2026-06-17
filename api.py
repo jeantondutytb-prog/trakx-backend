@@ -126,11 +126,10 @@ async def feed(
 ):
     try:
         from database import get_feed_annonces
-        since_hours = None if _is_subscribed(user) else 24
         return get_feed_annonces(offset=offset, limit=limit, marque=marque,
                                   taille=taille, score_min=score_min,
                                   prix_min=prix_min, prix_max=prix_max,
-                                  search=search, order=order, since_hours=since_hours)
+                                  search=search, order=order, since_hours=None)
     except Exception as e:
         log.error(f"feed: {e}")
         return JSONResponse(status_code=500, content={"error": "Erreur interne"})
@@ -155,7 +154,7 @@ async def vinted_brand(brand_id: int, user: dict = Depends(get_current_user)):
         return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 
-NICHE_LIMITS = {"free": 1, "starter": 3, "pro": 10, "expert": None}
+NICHE_LIMITS = {"free": None, "starter": None, "pro": None, "expert": None}
 
 def _get_plan(user: dict) -> str:
     email = user.get("email", "")
@@ -354,7 +353,7 @@ async def niches_delete(niche_id: int, user: dict = Depends(get_current_user)):
 # ---- SURVEILLANCE ----
 
 @app.get("/surveillance")
-async def surveillance_list(user: dict = Depends(get_subscribed_user)):
+async def surveillance_list(user: dict = Depends(get_current_user)):
     try:
         from database import refresh_surveillance
         return refresh_surveillance(user["id"])
@@ -363,7 +362,7 @@ async def surveillance_list(user: dict = Depends(get_subscribed_user)):
         return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 @app.post("/surveillance")
-async def surveillance_add(payload: dict, user: dict = Depends(get_subscribed_user)):
+async def surveillance_add(payload: dict, user: dict = Depends(get_current_user)):
     try:
         from database import add_surveillance
         if not payload.get("id"):
@@ -374,7 +373,7 @@ async def surveillance_add(payload: dict, user: dict = Depends(get_subscribed_us
         return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 @app.delete("/surveillance/{annonce_id}")
-async def surveillance_remove(annonce_id: int, user: dict = Depends(get_subscribed_user)):
+async def surveillance_remove(annonce_id: int, user: dict = Depends(get_current_user)):
     try:
         from database import remove_surveillance
         remove_surveillance(user["id"], annonce_id)
