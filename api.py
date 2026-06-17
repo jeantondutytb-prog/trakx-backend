@@ -28,7 +28,7 @@ app.add_middleware(
 )
 
 SUPABASE_URL = "https://apwedqsklyzroeyrokqb.supabase.co"
-SUPABASE_ANON_KEY = "sb_publishable_ExNINsgU98WsaiqBeW0x-A_HXqQFLz1"
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "sb_publishable_ExNINsgU98WsaiqBeW0x-A_HXqQFLz1")
 
 async def get_current_user(authorization: str = Header(None), require_sub: bool = False) -> dict:
     if not authorization or not authorization.lower().startswith("bearer "):
@@ -264,7 +264,11 @@ async def niches_create(payload: dict, user: dict = Depends(get_current_user)):
 @app.get("/niches/{niche_id}/items")
 async def niches_items(niche_id: int, limit: int = Query(100, ge=1, le=500), user: dict = Depends(get_current_user)):
     try:
-        from database import get_niche_items
+        from database import get_niche_items, list_user_niches
+        # Verify the niche belongs to the requesting user
+        user_niches = list_user_niches(user["id"])
+        if not any(n["id"] == niche_id for n in user_niches):
+            return JSONResponse(status_code=403, content={"error": "Niche introuvable"})
         return get_niche_items(niche_id, limit=limit)
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})

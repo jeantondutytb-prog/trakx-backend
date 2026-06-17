@@ -484,10 +484,14 @@ def mark_niche_items_sold(niche_id: int, seen_ids: list[int], scan_interval_sec:
     if not seen_ids:
         return
     if mode == "pg":
-        conn.run("""UPDATE niche_items SET sold_at=:now
+        # pg8000 doesn't support Python list for ANY/ALL — use NOT IN with explicit placeholders
+        placeholders = ",".join(f":s{i}" for i in range(len(seen_ids)))
+        kwargs = {f"s{i}": v for i, v in enumerate(seen_ids)}
+        kwargs.update({"now": now, "nid": niche_id, "cutoff": cutoff})
+        conn.run(f"""UPDATE niche_items SET sold_at=:now
             WHERE niche_id=:nid AND sold_at IS NULL
-            AND vinted_id != ALL(:seen) AND last_seen < :cutoff""",
-            now=now, nid=niche_id, seen=seen_ids, cutoff=cutoff)
+            AND vinted_id NOT IN ({placeholders}) AND last_seen < :cutoff""",
+            **kwargs)
     else:
         placeholders = ",".join("?" for _ in seen_ids)
         conn.execute(f"""UPDATE niche_items SET sold_at=?
