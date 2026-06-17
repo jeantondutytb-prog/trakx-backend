@@ -1,25 +1,24 @@
 """
 Trakr — Database avec connection pooling
 """
-import os, statistics, logging
+import os, statistics, logging, threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
 log = logging.getLogger("database")
 DATABASE_URL = os.getenv("DATABASE_URL")
-_conn_cache = None
+_thread_local = threading.local()
 
 def get_conn():
-    global _conn_cache
     if DATABASE_URL:
         import pg8000.native
-        # Réutiliser la connexion existante si possible
+        conn = getattr(_thread_local, 'conn', None)
         try:
-            if _conn_cache is not None:
-                _conn_cache.run("SELECT 1")
-                return _conn_cache, "pg"
-        except:
-            _conn_cache = None
+            if conn is not None:
+                conn.run("SELECT 1")
+                return conn, "pg"
+        except Exception:
+            _thread_local.conn = None
 
         url = DATABASE_URL.replace("postgresql://","").replace("postgres://","")
         user_pass, rest = url.split("@", 1)
@@ -34,11 +33,12 @@ def get_conn():
         else:
             host = host_port
 
-        _conn_cache = pg8000.native.Connection(
+        conn = pg8000.native.Connection(
             user=user, password=password, host=host,
             port=port, database=db, ssl_context=True
         )
-        return _conn_cache, "pg"
+        _thread_local.conn = conn
+        return conn, "pg"
     else:
         import sqlite3
         db_path = Path.home() / "Downloads" / "trakr.db"
@@ -345,12 +345,12 @@ def stats_db() -> dict:
     if mode == "pg":
         nb_a = conn.run("SELECT COUNT(*) FROM annonces")[0][0]
         nb_p = conn.run("SELECT COUNT(*) FROM prix_history")[0][0]
-        niches_rows = conn.run("SELECT marque, COUNT(*) as nb, AVG(prix) as prix_moy, MIN(prix) as prix_min, MAX(prix) as prix_max FROM prix_history GROUP BY marque ORDER BY nb DESC")
+        niches_rows = conn.run("SELECT marque, COUNT(*) as nb, AVG(prix) as prix_moy, MIN(prix) as prix_min, MAX(prix) as prix_max FROM prix_history GROUP BY marque ORDER BY nb DESC LIMIT 200")
         niches = [{"marque": r[0], "nb": r[1], "prix_moy": r[2], "prix_min": r[3], "prix_max": r[4]} for r in niches_rows]
     else:
         nb_a = conn.execute("SELECT COUNT(*) FROM annonces").fetchone()[0]
         nb_p = conn.execute("SELECT COUNT(*) FROM prix_history").fetchone()[0]
-        niches = [dict(r) for r in conn.execute("SELECT marque, COUNT(*) as nb, AVG(prix) as prix_moy, MIN(prix) as prix_min, MAX(prix) as prix_max FROM prix_history GROUP BY marque ORDER BY nb DESC").fetchall()]
+        niches = [dict(r) for r in conn.execute("SELECT marque, COUNT(*) as nb, AVG(prix) as prix_moy, MIN(prix) as prix_min, MAX(prix) as prix_max FROM prix_history GROUP BY marque ORDER BY nb DESC LIMIT 200").fetchall()]
     return {"annonces": nb_a, "prix_history": nb_p, "niches": niches}
 
 
@@ -573,30 +573,41 @@ def remove_surveillance(user_id: str, annonce_id: int) -> bool:
     return conn.execute("SELECT changes()").fetchone()[0] > 0
 
 def refresh_surveillance(user_id: str) -> list[dict]:
-    """Update last_seen_le/vendu/prix for watched items by checking if they're still in `annonces`."""
+    """Update last_seen_le/vendu/prix for watched items using a single batch query."""
     conn, mode = get_conn()
     items = list_surveillance(user_id)
+    if not items:
+        return items
     now = datetime.now().isoformat()
-    for it in items:
-        if mode == "pg":
-            row = conn.run("SELECT prix FROM annonces WHERE id=:id", id=it["annonce_id"])
-            if row:
+    ann_ids = [it["annonce_id"] for it in items]
+    if mode == "pg":
+        placeholders = ",".join(f":a{i}" for i in range(len(ann_ids)))
+        kwargs = {f"a{i}": v for i, v in enumerate(ann_ids)}
+        rows = conn.run(f"SELECT id, prix FROM annonces WHERE id IN ({placeholders})", **kwargs)
+        found = {r[0]: r[1] for r in rows}
+        for it in items:
+            aid = it["annonce_id"]
+            if aid in found:
                 conn.run("UPDATE surveillance SET prix=:p, last_seen_le=:now, vendu=FALSE WHERE user_id=:u AND annonce_id=:aid",
-                    p=row[0][0], now=now, u=user_id, aid=it["annonce_id"])
-                it["prix"], it["last_seen_le"], it["vendu"] = row[0][0], now, False
+                    p=found[aid], now=now, u=user_id, aid=aid)
+                it["prix"], it["last_seen_le"], it["vendu"] = found[aid], now, False
             else:
-                conn.run("UPDATE surveillance SET vendu=TRUE WHERE user_id=:u AND annonce_id=:aid", u=user_id, aid=it["annonce_id"])
+                conn.run("UPDATE surveillance SET vendu=TRUE WHERE user_id=:u AND annonce_id=:aid", u=user_id, aid=aid)
                 it["vendu"] = True
-        else:
-            row = conn.execute("SELECT prix FROM annonces WHERE id=?", (it["annonce_id"],)).fetchone()
-            if row:
+    else:
+        placeholders = ",".join("?" for _ in ann_ids)
+        rows = conn.execute(f"SELECT id, prix FROM annonces WHERE id IN ({placeholders})", ann_ids).fetchall()
+        found = {r[0]: r[1] for r in rows}
+        for it in items:
+            aid = it["annonce_id"]
+            if aid in found:
                 conn.execute("UPDATE surveillance SET prix=?, last_seen_le=?, vendu=0 WHERE user_id=? AND annonce_id=?",
-                    (row[0], now, user_id, it["annonce_id"]))
-                it["prix"], it["last_seen_le"], it["vendu"] = row[0], now, False
+                    (found[aid], now, user_id, aid))
+                it["prix"], it["last_seen_le"], it["vendu"] = found[aid], now, False
             else:
-                conn.execute("UPDATE surveillance SET vendu=1 WHERE user_id=? AND annonce_id=?", (user_id, it["annonce_id"]))
+                conn.execute("UPDATE surveillance SET vendu=1 WHERE user_id=? AND annonce_id=?", (user_id, aid))
                 it["vendu"] = True
-            conn.commit()
+        conn.commit()
     return items
 
 
@@ -605,12 +616,12 @@ def refresh_surveillance(user_id: str) -> list[dict]:
 def get_subscription(user_email: str) -> dict | None:
     conn, mode = get_conn()
     if mode == "pg":
-        rows = conn.run("SELECT user_email,stripe_customer_id,stripe_subscription_id,status,current_period_end FROM subscriptions WHERE user_email=:e", e=user_email)
+        rows = conn.run("SELECT user_email,stripe_customer_id,stripe_subscription_id,status,current_period_end,plan FROM subscriptions WHERE user_email=:e", e=user_email)
         if not rows:
             return None
-        cols = ["user_email","stripe_customer_id","stripe_subscription_id","status","current_period_end"]
+        cols = ["user_email","stripe_customer_id","stripe_subscription_id","status","current_period_end","plan"]
         return dict(zip(cols, rows[0]))
-    row = conn.execute("SELECT user_email,stripe_customer_id,stripe_subscription_id,status,current_period_end FROM subscriptions WHERE user_email=?", (user_email,)).fetchone()
+    row = conn.execute("SELECT user_email,stripe_customer_id,stripe_subscription_id,status,current_period_end,plan FROM subscriptions WHERE user_email=?", (user_email,)).fetchone()
     return dict(row) if row else None
 
 def get_config(key: str, default: str = None) -> str:

@@ -2,6 +2,7 @@
 Trakr — API FastAPI
 """
 from fastapi import FastAPI, Query, Header, HTTPException, Depends, Request
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import sys, httpx, os, hmac, hashlib, logging
@@ -154,7 +155,7 @@ async def vinted_brand(brand_id: int, user: dict = Depends(get_current_user)):
         return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 
-NICHE_LIMITS = {"free": 1, "starter": 1, "pro": 5, "expert": None}
+NICHE_LIMITS = {"free": 1, "starter": 3, "pro": 10, "expert": None}
 
 def _get_plan(user: dict) -> str:
     email = user.get("email", "")
@@ -167,7 +168,7 @@ def _get_plan(user: dict) -> str:
 def _plan_to_amount(amount_cents: int) -> str:
     if amount_cents >= 3990:
         return "expert"
-    if amount_cents >= 1990:
+    if amount_cents >= 990:
         return "pro"
     return "starter"
 
@@ -289,14 +290,23 @@ async def niches_list(user: dict = Depends(get_current_user)):
         niche_limit = NICHE_LIMITS.get(plan)
         return {"niches": niches, "plan": plan, "niche_limit": niche_limit}
     except Exception as e:
-        log.error(f"endpoint error: {e}")
+        log.error(f"niches_list: {e}")
         return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
+class NichePayload(BaseModel):
+    nom: str
+    lien: str = None
+    marque: str = None
+    taille: str = None
+    score_min: int = None
+    prix_min: float = None
+    recherche: str = None
+
 @app.post("/niches")
-async def niches_create(payload: dict, user: dict = Depends(get_current_user)):
+async def niches_create(payload: NichePayload, user: dict = Depends(get_current_user)):
     try:
         from database import create_user_niche, list_user_niches
-        nom = (payload.get("nom") or "").strip()
+        nom = payload.nom.strip()
         if not nom:
             return JSONResponse(status_code=400, content={"error": "Nom requis"})
         plan = _get_plan(user)
@@ -307,12 +317,12 @@ async def niches_create(payload: dict, user: dict = Depends(get_current_user)):
                 return JSONResponse(status_code=403, content={"error": "niche_limit", "plan": plan, "limit": limit})
         return create_user_niche(
             user["id"], nom,
-            marque=payload.get("marque"), taille=payload.get("taille"),
-            score_min=payload.get("score_min"), prix_min=payload.get("prix_min"),
-            recherche=payload.get("recherche"), lien=payload.get("lien"),
+            marque=payload.marque, taille=payload.taille,
+            score_min=payload.score_min, prix_min=payload.prix_min,
+            recherche=payload.recherche, lien=payload.lien,
         )
     except Exception as e:
-        log.error(f"endpoint error: {e}")
+        log.error(f"niches_create: {e}")
         return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 @app.get("/niches/{niche_id}/items")
@@ -325,7 +335,7 @@ async def niches_items(niche_id: int, limit: int = Query(100, ge=1, le=500), use
             return JSONResponse(status_code=403, content={"error": "Niche introuvable"})
         return get_niche_items(niche_id, limit=limit)
     except Exception as e:
-        log.error(f"endpoint error: {e}")
+        log.error(f"niches_items: {e}")
         return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 @app.delete("/niches/{niche_id}")
@@ -337,7 +347,7 @@ async def niches_delete(niche_id: int, user: dict = Depends(get_current_user)):
             return JSONResponse(status_code=404, content={"error": "Niche introuvable"})
         return {"ok": True}
     except Exception as e:
-        log.error(f"endpoint error: {e}")
+        log.error(f"niches_delete: {e}")
         return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 
@@ -349,7 +359,7 @@ async def surveillance_list(user: dict = Depends(get_subscribed_user)):
         from database import refresh_surveillance
         return refresh_surveillance(user["id"])
     except Exception as e:
-        log.error(f"endpoint error: {e}")
+        log.error(f"surveillance_list: {e}")
         return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 @app.post("/surveillance")
@@ -360,7 +370,7 @@ async def surveillance_add(payload: dict, user: dict = Depends(get_subscribed_us
             return JSONResponse(status_code=400, content={"error": "id requis"})
         return add_surveillance(user["id"], payload)
     except Exception as e:
-        log.error(f"endpoint error: {e}")
+        log.error(f"surveillance_add: {e}")
         return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 @app.delete("/surveillance/{annonce_id}")
@@ -370,7 +380,7 @@ async def surveillance_remove(annonce_id: int, user: dict = Depends(get_subscrib
         remove_surveillance(user["id"], annonce_id)
         return {"ok": True}
     except Exception as e:
-        log.error(f"endpoint error: {e}")
+        log.error(f"surveillance_remove: {e}")
         return JSONResponse(status_code=500, content={"error": "Erreur interne"})
 
 

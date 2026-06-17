@@ -43,7 +43,7 @@ def parse_item(item):
             "vendeur":    (item.get("user") or {}).get("login", ""),
             "categorie":  item.get("catalog_title", ""),
         }
-    except:
+    except Exception:
         return None
 
 
@@ -62,9 +62,9 @@ def ids_already_in_db(ids: list[int]) -> set[int]:
         return set()
     try:
         if mode == "pg":
-            placeholders = ",".join([":id" + str(i) for i in range(len(ids))])
+            placeholders = ",".join(f":id{i}" for i in range(len(ids)))
             kwargs = {f"id{i}": v for i, v in enumerate(ids)}
-            rows = conn.run(f"SELECT id FROM annonces WHERE id = ANY(:ids)", ids=ids)
+            rows = conn.run(f"SELECT id FROM annonces WHERE id IN ({placeholders})", **kwargs)
             return {r[0] for r in rows}
         else:
             placeholders = ",".join(["?" for _ in ids])
@@ -100,9 +100,9 @@ async def run_scan_with_session(s, cookies_str):
             break
 
         if r.status_code == 429:
-            log.warning("Rate limit Vinted — pause 60s")
+            log.warning("Rate limit Vinted — pause 60s puis abandon du scan")
             await asyncio.sleep(60)
-            continue
+            break
         if r.status_code != 200:
             log.warning(f"Page {page}: HTTP {r.status_code}")
             break
