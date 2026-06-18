@@ -437,10 +437,14 @@ STRIPE_DEFAULT_PORTAL_URL = "https://billing.stripe.com/p/login/00w8wOcJObg0fIw4
 @app.get("/config")
 def config_get():
     from database import get_config
+    base_url = get_config("stripe_url", STRIPE_DEFAULT_URL)
     return {
         "price_display": get_config("price_display", STRIPE_DEFAULT_PRICE),
-        "stripe_url": get_config("stripe_url", STRIPE_DEFAULT_URL),
-        "stripe_portal_url": get_config("stripe_portal_url", STRIPE_DEFAULT_PORTAL_URL),
+        "stripe_url": base_url,
+        "stripe_url_starter": get_config("stripe_url_starter", base_url),
+        "stripe_url_pro":     get_config("stripe_url_pro",     base_url),
+        "stripe_url_expert":  get_config("stripe_url_expert",  base_url),
+        "stripe_portal_url":  get_config("stripe_portal_url",  STRIPE_DEFAULT_PORTAL_URL),
     }
 
 @app.post("/admin/config")
@@ -449,7 +453,7 @@ async def config_set(payload: dict, user: dict = Depends(get_current_user)):
     if user.get("email") not in admin_emails:
         raise HTTPException(status_code=403, detail="Admin requis")
     from database import set_config
-    allowed = {"price_display", "stripe_url", "stripe_portal_url"}
+    allowed = {"price_display", "stripe_url", "stripe_url_starter", "stripe_url_pro", "stripe_url_expert", "stripe_portal_url"}
     for k, v in payload.items():
         if k in allowed:
             set_config(k, str(v))

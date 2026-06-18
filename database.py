@@ -372,27 +372,42 @@ def stats_db() -> dict:
 
 def list_user_niches(user_id: str) -> list[dict]:
     conn, mode = get_conn()
+    def fmt(v): return round(float(v), 2) if v is not None else None
     if mode == "pg":
         rows = conn.run("SELECT id,nom,marque,taille,score_min,prix_min,recherche,lien,created_le FROM niches WHERE user_id=:u ORDER BY id DESC", u=user_id)
         cols = ["id","nom","marque","taille","score_min","prix_min","recherche","lien","created_le"]
         result = [dict(zip(cols, r)) for r in rows]
+        if result:
+            ids = [n["id"] for n in result]
+            placeholders = ",".join(f":id{i}" for i in range(len(ids)))
+            kwargs = {f"id{i}": v for i, v in enumerate(ids)}
+            stats_rows = conn.run(
+                f"SELECT niche_id, COUNT(*), COUNT(sold_at), AVG(prix), MIN(prix), MAX(prix) FROM niche_items WHERE niche_id IN ({placeholders}) GROUP BY niche_id",
+                **kwargs)
+            stats = {r[0]: r[1:] for r in stats_rows}
+            for n in result:
+                r = stats.get(n["id"], (0, 0, None, None, None))
+                n["nb_items"] = int(r[0] or 0); n["nb_vendus"] = int(r[1] or 0)
+                n["prix_moyen"] = fmt(r[2]); n["prix_min_val"] = fmt(r[3]); n["prix_max_val"] = fmt(r[4])
+        else:
+            for n in result:
+                n["nb_items"] = n["nb_vendus"] = 0; n["prix_moyen"] = n["prix_min_val"] = n["prix_max_val"] = None
     else:
         result = [dict(r) for r in conn.execute("SELECT id,nom,marque,taille,score_min,prix_min,recherche,lien,created_le FROM niches WHERE user_id=? ORDER BY id DESC", (user_id,)).fetchall()]
-
-    for n in result:
-        if mode == "pg":
-            row = conn.run("""SELECT COUNT(*), COUNT(sold_at), AVG(prix), MIN(prix), MAX(prix)
-                FROM niche_items WHERE niche_id=:nid""", nid=n["id"])
+        if result:
+            ids = [n["id"] for n in result]
+            placeholders = ",".join("?" for _ in ids)
+            stats_rows = conn.execute(
+                f"SELECT niche_id, COUNT(*), COUNT(sold_at), AVG(prix), MIN(prix), MAX(prix) FROM niche_items WHERE niche_id IN ({placeholders}) GROUP BY niche_id",
+                ids).fetchall()
+            stats = {r[0]: r[1:] for r in stats_rows}
+            for n in result:
+                r = stats.get(n["id"], (0, 0, None, None, None))
+                n["nb_items"] = int(r[0] or 0); n["nb_vendus"] = int(r[1] or 0)
+                n["prix_moyen"] = fmt(r[2]); n["prix_min_val"] = fmt(r[3]); n["prix_max_val"] = fmt(r[4])
         else:
-            row = conn.execute("""SELECT COUNT(*), COUNT(sold_at), AVG(prix), MIN(prix), MAX(prix)
-                FROM niche_items WHERE niche_id=?""", (n["id"],)).fetchall()
-        r = row[0] if row else (0, 0, None, None, None)
-        def fmt(v): return round(float(v), 2) if v is not None else None
-        n["nb_items"]    = int(r[0] or 0)
-        n["nb_vendus"]   = int(r[1] or 0)
-        n["prix_moyen"]  = fmt(r[2])
-        n["prix_min_val"]= fmt(r[3])
-        n["prix_max_val"]= fmt(r[4])
+            for n in result:
+                n["nb_items"] = n["nb_vendus"] = 0; n["prix_moyen"] = n["prix_min_val"] = n["prix_max_val"] = None
     return result
 
 def _build_where(mode, marque, taille, prix_min, recherche):
