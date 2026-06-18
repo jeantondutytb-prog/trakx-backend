@@ -455,6 +455,36 @@ async def config_set(payload: dict, user: dict = Depends(get_current_user)):
             set_config(k, str(v))
     return {"ok": True}
 
+@app.get("/admin/subscriptions")
+async def admin_list_subscriptions(user: dict = Depends(get_current_user)):
+    admin_emails = {e.strip() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+    if user.get("email") not in admin_emails:
+        raise HTTPException(status_code=403, detail="Admin requis")
+    from database import get_conn
+    conn, mode = get_conn()
+    if mode == "pg":
+        rows = conn.run("SELECT user_email,status,plan,stripe_subscription_id,updated_le FROM subscriptions ORDER BY updated_le DESC LIMIT 100")
+        cols = ["user_email","status","plan","stripe_subscription_id","updated_le"]
+        return [dict(zip(cols, r)) for r in rows]
+    rows = conn.execute("SELECT user_email,status,plan,stripe_subscription_id,updated_le FROM subscriptions ORDER BY updated_le DESC LIMIT 100").fetchall()
+    return [dict(r) for r in rows]
+
+@app.post("/admin/grant")
+async def admin_grant(payload: dict, user: dict = Depends(get_current_user)):
+    """Force-set a subscription. Body: {email, plan, status}"""
+    admin_emails = {e.strip() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+    if user.get("email") not in admin_emails:
+        raise HTTPException(status_code=403, detail="Admin requis")
+    email = payload.get("email", "").strip().lower()
+    plan = payload.get("plan", "expert")
+    status = payload.get("status", "active")
+    if not email:
+        raise HTTPException(status_code=400, detail="email requis")
+    from database import upsert_subscription
+    upsert_subscription(user_email=email, status=status, plan=plan)
+    log.info(f"admin/grant: {email} → {plan} ({status})")
+    return {"ok": True, "email": email, "plan": plan, "status": status}
+
 @app.get("/ping")
 def ping():
     try:
