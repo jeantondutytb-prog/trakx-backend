@@ -201,14 +201,15 @@ def sauvegarder_annonces(annonces: list[dict]) -> int:
     for a in annonces:
         try:
             if mode == "pg":
-                conn.run("""INSERT INTO annonces (id,titre,marque,taille,prix,nb_favoris,url,photo,vendeur,scraped_le,publie_le)
+                rows = conn.run("""INSERT INTO annonces (id,titre,marque,taille,prix,nb_favoris,url,photo,vendeur,scraped_le,publie_le)
                     VALUES (:id,:titre,:marque,:taille,:prix,:nb_favoris,:url,:photo,:vendeur,:now,:publie_le)
-                    ON CONFLICT (id) DO NOTHING""",
+                    ON CONFLICT (id) DO UPDATE SET nb_favoris=EXCLUDED.nb_favoris, prix=EXCLUDED.prix
+                    RETURNING (xmax = 0) AS is_new""",
                     id=a["id"],titre=a["titre"],marque=a["marque"],taille=a["taille"],
                     prix=a["prix"],nb_favoris=a["nb_favoris"],url=a["url"],
                     photo=a.get("photo",""),vendeur=a.get("vendeur",""),now=now,
                     publie_le=a.get("publie_le",""))
-                if conn.row_count > 0:
+                if rows and rows[0][0]:  # is_new = True → vrai insert
                     nouvelles += 1
                     conn.run("INSERT INTO prix_history (marque,taille,prix,scraped_le) VALUES (:m,:t,:p,:n)",
                         m=a["marque"],t=a["taille"],p=a["prix"],n=now)
