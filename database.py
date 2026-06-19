@@ -299,7 +299,7 @@ def _fetch_feed_rows(conn, mode, marques, taille, prix_min, prix_max, search, or
             kwargs["search"] = f"%{search.lower()}%"
             kwargs["search2"] = f"%{search.lower()}%"
         if since_ts:
-            conditions.append("(publie_le >= :since_ts AND publie_le != '')")
+            conditions.append("(publie_le != '' AND publie_le IS NOT NULL AND publie_le::timestamptz >= :since_ts::timestamptz)")
             kwargs["since_ts"] = since_ts
         if favs_min is not None:
             conditions.append("nb_favoris >= :favs_min")
@@ -348,7 +348,7 @@ def get_feed_annonces(offset: int = 0, limit: int = 40, marque: str = None,
                        since_hours: int = None, favs_min: int = None) -> list[dict]:
     conn, mode = get_conn()
     marques = [m.strip().lower() for m in marque.split(",") if m.strip()] if marque else None
-    since_ts = (datetime.now() - timedelta(hours=since_hours)).isoformat() if since_hours else None
+    since_ts = (datetime.utcnow() - timedelta(hours=since_hours)).strftime('%Y-%m-%dT%H:%M:%S') if since_hours else None
 
     if score_min is not None or order == "score":
         candidates = _fetch_feed_rows(conn, mode, marques, taille, prix_min, prix_max, search,
