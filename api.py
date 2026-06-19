@@ -217,7 +217,31 @@ async def me(user: dict = Depends(get_current_user)):
     subscribed = _is_subscribed(user)
     plan = _get_plan(user)
     niche_limit = NICHE_LIMITS.get(plan)
-    return {"id": user.get("id"), "email": email, "subscribed": subscribed, "plan": plan, "niche_limit": niche_limit, "is_admin": is_admin}
+    from database import get_subscription, _trial_active
+    sub = get_subscription(email)
+    is_trial = bool(sub and _trial_active(sub))
+    trial_expires_at = sub.get("trial_expires_at") if sub else None
+    return {
+        "id": user.get("id"),
+        "email": email,
+        "subscribed": subscribed,
+        "plan": plan,
+        "niche_limit": niche_limit,
+        "is_admin": is_admin,
+        "is_trial": is_trial,
+        "trial_expires_at": trial_expires_at if is_trial else None,
+    }
+
+@app.post("/trial/start")
+async def trial_start(user: dict = Depends(get_current_user)):
+    """Grant a 24h Expert trial to a new user. One-time only."""
+    email = user.get("email", "")
+    from database import start_trial
+    result = start_trial(email)
+    if not result["ok"]:
+        return JSONResponse(status_code=409, content={"error": result["reason"]})
+    log.info(f"trial/start: {email}")
+    return result
 
 
 @app.post("/stripe/webhook")

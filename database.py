@@ -104,6 +104,9 @@ def init_db():
             conn.run("ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS plan TEXT DEFAULT 'starter'")
         except: pass
         try:
+            conn.run("ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS trial_expires_at TEXT")
+        except: pass
+        try:
             conn.run("CREATE INDEX IF NOT EXISTS idx_sub_email ON subscriptions(user_email)")
         except: pass
         conn.run("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
@@ -674,12 +677,12 @@ def refresh_surveillance(user_id: str) -> list[dict]:
 def get_subscription(user_email: str) -> dict | None:
     conn, mode = get_conn()
     if mode == "pg":
-        rows = conn.run("SELECT user_email,stripe_customer_id,stripe_subscription_id,status,current_period_end,plan FROM subscriptions WHERE user_email=:e", e=user_email)
+        rows = conn.run("SELECT user_email,stripe_customer_id,stripe_subscription_id,status,current_period_end,plan,trial_expires_at FROM subscriptions WHERE user_email=:e", e=user_email)
         if not rows:
             return None
-        cols = ["user_email","stripe_customer_id","stripe_subscription_id","status","current_period_end","plan"]
+        cols = ["user_email","stripe_customer_id","stripe_subscription_id","status","current_period_end","plan","trial_expires_at"]
         return dict(zip(cols, rows[0]))
-    row = conn.execute("SELECT user_email,stripe_customer_id,stripe_subscription_id,status,current_period_end,plan FROM subscriptions WHERE user_email=?", (user_email,)).fetchone()
+    row = conn.execute("SELECT user_email,stripe_customer_id,stripe_subscription_id,status,current_period_end,plan,trial_expires_at FROM subscriptions WHERE user_email=?", (user_email,)).fetchone()
     return dict(row) if row else None
 
 def get_config(key: str, default: str = None) -> str:
@@ -702,18 +705,61 @@ def set_config(key: str, value: str):
         conn.execute("INSERT INTO config (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
         conn.commit()
 
+def _trial_active(sub: dict) -> bool:
+    """Return True if the subscription has an unexpired trial."""
+    exp = sub.get("trial_expires_at")
+    return bool(exp and exp > datetime.now().isoformat())
+
 def is_subscribed(user_email: str) -> bool:
     sub = get_subscription(user_email)
     if not sub:
         return False
-    return sub["status"] == "active"
+    if sub["status"] == "active":
+        return True
+    return _trial_active(sub)
 
 def get_user_plan(user_email: str) -> str:
     """Returns 'starter', 'pro', 'expert', or 'free'."""
     sub = get_subscription(user_email)
-    if not sub or sub["status"] != "active":
+    if not sub:
         return "free"
-    return sub.get("plan") or "starter"
+    if sub["status"] == "active":
+        return sub.get("plan") or "starter"
+    if _trial_active(sub):
+        return "expert"
+    return "free"
+
+TRIAL_HOURS = 24
+
+def start_trial(user_email: str) -> dict:
+    """Grant a 24h Expert trial. No-op if user already subscribed or already used trial."""
+    sub = get_subscription(user_email)
+    # Block if active subscription or trial already started (even if expired)
+    if sub and (sub["status"] == "active" or sub.get("trial_expires_at")):
+        return {"ok": False, "reason": "already_used"}
+    conn, mode = get_conn()
+    now = datetime.now()
+    expires = (now + timedelta(hours=TRIAL_HOURS)).isoformat()
+    now_str = now.isoformat()
+    if mode == "pg":
+        conn.run("""INSERT INTO subscriptions (user_email, status, plan, trial_expires_at, updated_le)
+            VALUES (:e, 'trial', 'expert', :exp, :now)
+            ON CONFLICT (user_email) DO UPDATE SET
+                trial_expires_at = EXCLUDED.trial_expires_at,
+                updated_le = EXCLUDED.updated_le
+            WHERE subscriptions.status != 'active' AND subscriptions.trial_expires_at IS NULL""",
+            e=user_email, exp=expires, now=now_str)
+    else:
+        conn.execute("""INSERT INTO subscriptions (user_email, status, plan, trial_expires_at, updated_le)
+            VALUES (?, 'trial', 'expert', ?, ?)
+            ON CONFLICT(user_email) DO UPDATE SET
+                trial_expires_at = excluded.trial_expires_at,
+                updated_le = excluded.updated_le
+            WHERE status != 'active' AND trial_expires_at IS NULL""",
+            (user_email, expires, now_str))
+        conn.commit()
+    log.info(f"Trial started: {user_email} → expert until {expires}")
+    return {"ok": True, "trial_expires_at": expires}
 
 def upsert_subscription(user_email: str, stripe_customer_id: str = None,
                          stripe_subscription_id: str = None, status: str = "active",
